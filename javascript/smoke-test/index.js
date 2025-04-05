@@ -18,32 +18,50 @@ Your program will implement the TCP Echo Service from RFC 862.
 */
 const net = require("net");
 
-const server = net.createServer((socket) => {
-  let isComplete = false;
-  
-  console.log("new connection from ", socket.localAddress)
+const server = net.createServer({ allowHalfOpen: true }, (socket) => {
+  console.log("new connection from ", socket.remoteAddress);
 
   // received data from client
   socket.on("data", function (data) {
-    console.log("Received data:", data.toString());
-    isComplete = socket.write(data);
+    console.log("received data:", data);
+    // check if entire data was written to kernel send buffer
+    const isWritten = socket.write(data);
+    if (!isWritten) {
+      // Pause reading if the buffer is full
+      socket.pause();
+    }
   });
 
-  socket.on("error", function (error) {
-    console.log("error in communication ", error);
+  socket.on("error", function (err) {
+    console.error("Socket error:", err.message);
+    socket.destroy();
+  });
+
+  /* 
+  emitted when internal buffer managed by node becomes empty and ready to receive data
+  this could mean that it has successfully transferred all the bytes from it's internal buffer to the kernel's send buffer
+  or that it has transferred all the bytes it could hold at a time and is ready to receive more
+  */
+  socket.on("drain", () => {
+    socket.resume();
   });
 
   // client disconnected
   socket.on("end", function () {
-    if (isComplete) {
-      isComplete = false;
-      socket.end();
+    console.log("client closed socket");
+    if (socket.bytesWritten >= socket.bytesRead) {
+      socket.end(() => console.log("server closed socket"));
     }
+  });
+
+  socket.on("close", (hadError) => {
+    console.log("socket closed", hadError ? "with error" : "without error");
   });
 });
 
 server.on("error", (error) => {
   console.log("error spinning up server", error);
+  server.close();
 });
 
 server.listen(7, () => {
