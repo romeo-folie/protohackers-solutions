@@ -17,44 +17,61 @@
 
 import { createServer } from "net";
 
-// define function to check if value isPrime
-const MalformedResponse = { method: "isPrime" };
+const MalformedResponse = { error: "invalid request" };
 
 function isPrime(n) {
-  if (n < 2) return false;
-
-  for (let i = 2; i < parseInt(Math.sqrt(n) + 1); i++) {
+  if (!Number.isInteger(n)) return false;
+  if (n <= 1) return false;
+  if (n === 2) return true;
+  
+  const limit = Math.ceil(Math.sqrt(n)) + 1;
+  
+  for (let i = 2; i < limit; i++) {
     if (n % i === 0) return false;
   }
-
+  
   return true;
 }
 
-const server = createServer({ allowHalfOpen: true }, (socket) => {
+const server = createServer((socket) => {
   console.log("new connection from ", socket.remoteAddress);
+
+  let requestBuffer = "";
 
   socket.on("data", (chunk) => {
     console.log("received data: ", chunk.toString());
+    requestBuffer += chunk.toString();
 
-    try {
-      const request = JSON.parse(chunk.toString());
-      console.log("parsed ", request);
-      // check if json object has both the method and number fields
-      // and their values match what is expected
-      if (
-        request.method === undefined ||
-        request.number === undefined ||
-        typeof request.method !== "string" ||
-        typeof request.number !== "number"
-      ) {
-        throw new Error("Malformed Request");
+    let newlineIndex;
+    while ((newlineIndex = requestBuffer.indexOf("\n")) !== -1) {
+      const raw = requestBuffer.slice(0, newlineIndex).trim();
+      requestBuffer = requestBuffer.slice(newlineIndex + 1);
+      if (!raw) continue;
+
+      try {
+        const request = JSON.parse(raw);
+        if (
+          request.method === undefined ||
+          request.number === undefined ||
+          request.method !== "isPrime" ||
+          typeof request.method !== "string" ||
+          typeof request.number !== "number"
+        ) {
+          throw new Error('malformed request');
+        }
+  
+        socket.write(
+          JSON.stringify({
+            method: request.method,
+            prime: isPrime(request.number),
+          }) + "\n"
+        );
+      } catch (error) {
+        console.log(`error: ${error.message}`);
+        if (socket.writable) socket.write(JSON.stringify(MalformedResponse));
+        socket.end();
       }
-
-      socket.write(JSON.stringify({ method: "isPrime", prime: isPrime(request.number) }) + '\n');
-    } catch (error) {
-      console.log("ERROR ", error.message);
-      socket.write(JSON.stringify(MalformedResponse));
-      socket.end();
+      
     }
   });
 
